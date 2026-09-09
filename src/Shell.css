@@ -1,0 +1,126 @@
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  text-align: left;
+  /* La nav ora e' "fixed" (esce dal flusso), quindi lasciamo qui lo spazio
+     equivalente alla sua altezza perche' il contenuto non ci finisca sotto */
+  padding-top: var(--nav-height);
+}
+
+.view-nav {
+  display: flex;
+  align-items: center;
+  min-height: var(--nav-height);
+  box-sizing: border-box;
+  gap: 4px;
+  padding: 0 32px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  /* Fissa e a tutta larghezza rispetto alla vera finestra del browser, non
+     limitata alla colonna centrale (max-width) di #root: cosi' resta sempre
+     visibile e cliccabile anche quando la scheda Regia va a tutto schermo */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  z-index: 30;
+  flex-shrink: 0;
+}
+
+.view-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.view-nav-btn:hover {
+  color: var(--text);
+}
+
+.view-nav-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.view-nav-icon {
+  font-size: 14px;
+}
+
+.nav-badge {
+  background: var(--accent);
+  color: #1A1300;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  line-height: 1.5;
+}
+
+.view-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* L'attributo hidden da solo verrebbe "battuto" dalla regola display:flex qui
+   sopra (le nostre regole hanno sempre la precedenza su quelle di default del
+   browser): lo ribadiamo esplicitamente per nascondere davvero la scheda non attiva */
+.view-body[hidden] {
+  display: none;
+}
+
+/* La Regia e' una console pensata per lo schermo intero (era h-screen/w-screen):
+   dentro alla colonna centrale di #root (max-width 1126px) si "sbanana" perche'
+   deve stringersi in larghezza restando alta. Qui la facciamo uscire dal flusso
+   e occupare l'intera finestra del browser, sotto alla nav che resta fissa sopra */
+.view-body-regia {
+  position: fixed;
+  top: var(--nav-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  padding-top: 0;
+  overflow: hidden;
+}
+
+/* Anche la Libreria ora occupa tutta la larghezza della finestra del browser,
+   non solo la colonna centrale (max-width 1126px) di #root: stessa tecnica
+   della Regia (esce dal flusso, fissa sotto alla nav), ma con lo scroll
+   verticale normale al posto di "overflow: hidden", perche' qui il contenuto
+   (griglia dei video) puo' essere piu' alto della finestra */
+.view-body-library {
+  position: fixed;
+  top: var(--nav-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  padding-top: 0;
+  overflow-y: auto;
+}
+
+@media (max-width: 600px) {
+  .view-nav {
+    padding: 0 18px;
+  }
+  .view-nav-btn {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+}

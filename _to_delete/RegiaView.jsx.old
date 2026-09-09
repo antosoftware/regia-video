@@ -1,0 +1,120 @@
+import { useState } from 'react';
+import './RegiaView.css';
+
+// Sorgente dimostrativa mostrata finché non arriva almeno un video reale dalla libreria
+const DEMO_SOURCE = { id: 'demo-hdmi1', name: 'HDMI 1 (Cam 1)', demoColor: 'demo-indigo' };
+
+const INITIAL_OVERLAYS = [
+  { id: 'lower_third', label: 'Lower Third (Nome)' },
+  { id: 'logo', label: 'Logo Sponsor' },
+  { id: 'timer', label: 'Countdown Timer' },
+];
+
+export default function RegiaView({ sources, onRemoveSource }) {
+  // L'ultimo video inviato dalla libreria va "in onda"; finché non ne arriva
+  // nessuno resta visibile la sorgente dimostrativa
+  const activeSource = sources.length > 0 ? sources[sources.length - 1] : DEMO_SOURCE;
+
+  const [overlayState, setOverlayState] = useState(() =>
+    Object.fromEntries(INITIAL_OVERLAYS.map((o) => [o.id, false]))
+  );
+  const [isMuted, setIsMuted] = useState(true);
+
+  const toggleOverlay = (id) => {
+    setOverlayState((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  return (
+    <div className="regia-container">
+      <div className="regia-layout">
+        {/* MONITOR PRINCIPALE (PROGRAM) */}
+        <div className="regia-main">
+          <div className="regia-program">
+            <div className="regia-program-badge">
+              <span className="regia-live-dot" />
+              PROGRAM
+            </div>
+
+            <button
+              type="button"
+              className="regia-mute-btn"
+              onClick={() => setIsMuted((m) => !m)}
+              title={isMuted ? 'Attiva audio' : 'Disattiva audio'}
+            >
+              {isMuted ? '🔇' : '🔊'}
+            </button>
+
+            {activeSource.videoUrl && (
+              <button
+                type="button"
+                className="regia-remove-btn"
+                onClick={() => onRemoveSource?.(activeSource.id)}
+                title="Togli dalla regia (torna alle sorgenti dimostrative)"
+              >
+                ✕
+              </button>
+            )}
+
+            {activeSource.videoUrl ? (
+              <video
+                key={activeSource.id}
+                className="regia-program-video"
+                src={activeSource.videoUrl}
+                autoPlay
+                loop
+                muted={isMuted}
+                playsInline
+              />
+            ) : (
+              <div className={`regia-program-fallback ${activeSource.demoColor || ''}`}>
+                <span className="regia-program-label">{activeSource.name}</span>
+                <span className="regia-program-hint">Sorgente dimostrativa</span>
+              </div>
+            )}
+
+            {/* Overlay grafici sovrapposti al monitor */}
+            <div className="regia-overlay-layer">
+              <div className="regia-overlay-top">
+                {overlayState.logo && (
+                  <div className="regia-overlay-logo">★ MIO BRAND</div>
+                )}
+              </div>
+              <div className="regia-overlay-bottom">
+                {overlayState.lower_third && (
+                  <div className="regia-overlay-lower-third">
+                    <div className="regia-lt-name">{activeSource.name}</div>
+                    <div className="regia-lt-role">In onda</div>
+                  </div>
+                )}
+                {overlayState.timer && (
+                  <div className="regia-overlay-timer">10:00</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* PANNELLO OVERLAY */}
+        <div className="regia-overlays-panel">
+          <h2>Libreria Overlay & Grafiche</h2>
+          <div className="regia-overlays-grid">
+            {INITIAL_OVERLAYS.map((ov) => {
+              const active = overlayState[ov.id];
+              return (
+                <button
+                  key={ov.id}
+                  type="button"
+                  className={`regia-overlay-card ${active ? 'active' : ''}`}
+                  onClick={() => toggleOverlay(ov.id)}
+                >
+                  <span className="regia-overlay-label">{ov.label}</span>
+                  <span className="regia-overlay-status">{active ? 'IN ONDA' : 'OFF'}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

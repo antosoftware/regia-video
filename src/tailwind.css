@@ -1,0 +1,7 @@
+/* Solo i livelli "components" e "utilities": niente "base" (preflight), che
+   resetterebbe globalmente stili di bottoni/heading/liste usati anche dalla
+   Libreria e dalla barra di navigazione. Le utility Tailwind qui sotto sono
+   usate solo dalla vista Regia (le classi non hanno conflitti di nome con lo
+   stile custom del resto dell'app) */
+@tailwind components;
+@tailwind utilities;

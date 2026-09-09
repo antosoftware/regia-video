@@ -1,0 +1,28 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
+
+:root {
+  --bg: #15161B;
+  --surface: #1D1F26;
+  --surface-hover: #262832;
+  --border: #2B2D36;
+  --text: #F1EEE6;
+  --text-muted: #8B8D97;
+  --accent: #E8A33D;
+  --accent-dim: #7A5A24;
+  --radius: 10px;
+  /* Altezza della barra di navigazione (ora "fixed"): usata sia per
+     posizionarla sia per lo spazio da lasciarle sotto nelle altre viste */
+  --nav-height: 49px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
