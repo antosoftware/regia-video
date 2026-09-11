@@ -343,6 +343,14 @@ export default function RegiaView({
   incomingVideos?: MediaFile[];
   isBlackout?: boolean;
 }) {
+  // Rilevazione piattaforma senza plugin nativi aggiuntivi: la WebView2 di
+  // Windows espone "Windows" nello user agent esattamente come farebbe un
+  // browser Chrome/Edge normale. Usata SOLO per dare più spazio verticale ai
+  // 3 lettori piccoli sui portatili Windows (schermi più piccoli/con
+  // risoluzione diversa rispetto ai monitor grandi usati su Mac) — su Mac il
+  // layout resta invariato.
+  const isWindowsPlatform = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
+
   const [channels, setChannels] = useState<Channel[]>(INITIAL_CHANNELS);
   const [activeChannelId, setActiveChannelId] = useState<string>('ch1');
   const [volume, setVolume] = useState<number>(80);
@@ -940,7 +948,7 @@ export default function RegiaView({
         <div className="w-[74%] flex flex-col border-r border-zinc-800 p-2 gap-2 overflow-hidden bg-zinc-950 h-full">
           
           {/* MONITOR PROGRAM PRINCIPALE + TIMELINE FILMSTRIP */}
-          <div className="h-[67%] relative bg-black rounded-xl overflow-hidden border border-zinc-800 flex flex-col p-2 shrink-0 shadow-lg">
+          <div className={`relative bg-black rounded-xl overflow-hidden border border-zinc-800 flex flex-col p-2 shrink-0 shadow-lg ${isWindowsPlatform ? 'h-[54%]' : 'h-[67%]'}`}>
             
             {/* SCHERMO VIDEO PROGRAM */}
             <div className="relative flex-1 min-h-0 bg-black rounded-lg overflow-hidden flex items-center justify-center">
