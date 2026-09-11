@@ -427,7 +427,7 @@ export default function RegiaView({
 
         setChannelAudioLevels(() => {
           const next: { [key: string]: AudioLevels } = {};
-          channels.forEach((ch, idx) => {
+          channelsRef.current.forEach((ch, idx) => {
             if (ch.isPlaying && ch.url && !isBlackout) {
               if (ch.id === activeChannelId && masterL > 0) {
                 next[ch.id] = { left: masterL, right: masterR };
@@ -450,7 +450,11 @@ export default function RegiaView({
 
     animId = requestAnimationFrame(renderTick);
     return () => cancelAnimationFrame(animId);
-  }, [activeChannel, isPlaying, isBlackout, isMuted, volume, channels, activeChannelId]);
+    // NB: dipende solo da valori primitivi, MAI dall'intero array "channels" (che
+    // viene riscritto ~30 volte al secondo dal loop di sincronizzazione): prima
+    // ogni tick di quel loop faceva ripartire da zero questa animazione.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChannelId, activeChannel.url, activeChannel.isPlaying, activeChannel.playbackRate, isBlackout, isMuted, volume]);
 
   useEffect(() => {
     if (mainVideoRef.current) {
@@ -464,6 +468,16 @@ export default function RegiaView({
     }
   }, [activeChannelId, activeChannel?.playbackRate]);
 
+  // Firma stabile che cambia SOLO quando cambia davvero play/pausa, url o
+  // velocità di un canale — mai per il solo avanzare del tempo. Usata come
+  // dipendenza dell'effetto sotto, che altrimenti (dipendendo dall'intero
+  // array "channels", riscritto ~30 volte al secondo dal loop di sync)
+  // richiamava .play()/.pause() su video GIÀ in riproduzione decine di volte
+  // al secondo: è questo che causava i blocchi/rallentamenti nei 3 lettori.
+  const channelsPlaySignature = channels
+    .map((c) => `${c.id}:${c.isPlaying ? 1 : 0}:${c.url}:${c.playbackRate}`)
+    .join('|');
+
   useEffect(() => {
     if (mainVideoRef.current) {
       if (activeChannel.isPlaying && !isBlackout && activeChannel.url) {
@@ -473,7 +487,7 @@ export default function RegiaView({
       }
     }
 
-    channels.forEach((ch) => {
+    channelsRef.current.forEach((ch) => {
       const vid = channelVideoRefs.current[ch.id];
       if (vid && ch.url) {
         vid.playbackRate = ch.playbackRate;
@@ -484,7 +498,8 @@ export default function RegiaView({
         }
       }
     });
-  }, [channels, activeChannel.isPlaying, isBlackout]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelsPlaySignature, activeChannel.isPlaying, activeChannel.url, isBlackout]);
 
   // Sincronizzazione continua, stretta e bidirezionale tra Program e Lettore Piccolo
   useEffect(() => {
@@ -503,9 +518,13 @@ export default function RegiaView({
           setDuration(mainVid.duration);
         }
 
-        // Forzatura immediata e costante sul lettore piccolo per mantenere il sincronismo perfetto anche a 6x/7x
+        // Correzione periodica (non ad ogni frame) sul lettore piccolo per mantenere
+        // il sincronismo anche a 6x/7x, senza forzare un seek interno del video
+        // decine di volte al secondo (causa reale degli scatti/blocchi): una
+        // soglia più larga e un controllo ogni pochi frame bastano per restare
+        // percettivamente sincronizzati ma costano molto meno al decoder video.
         if (activeSmallVid) {
-          if (Math.abs(activeSmallVid.currentTime - currentT) > 0.05) {
+          if (counter % 3 === 0 && Math.abs(activeSmallVid.currentTime - currentT) > 0.15) {
             activeSmallVid.currentTime = currentT;
           }
           if (activeSmallVid.playbackRate !== activeChannel.playbackRate) {
@@ -514,7 +533,7 @@ export default function RegiaView({
         }
       }
 
-      if (counter % 2 === 0) {
+      if (counter % 4 === 0) {
         setChannels((prev) =>
           prev.map((c) => {
             const vid = channelVideoRefs.current[c.id];

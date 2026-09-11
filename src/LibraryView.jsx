@@ -224,6 +224,44 @@ const SKIP_DIR_NAMES = new Set(['System Volume Information', '$RECYCLE.BIN', 'no
 // (evita di generare centinaia di miniature in un colpo solo)
 const MAX_SEARCH_RESULTS = 60;
 
+// Quanti video vengono processati (metadata + miniatura) IN PARALLELO durante
+// l'apertura di una cartella. Prima venivano fatti uno alla volta in sequenza:
+// su Tauri/Windows, se anche un solo file grande era lento a rispondere al
+// seek richiesto per la miniatura, TUTTA la cartella restava bloccata in
+// attesa. Un pool con concorrenza limitata (non illimitata, per non
+// sovraccaricare disco/decoder) evita che un file lento blocchi gli altri.
+const METADATA_CONCURRENCY = 4;
+
+// Se l'estrazione di metadata/miniatura di un singolo video non si risolve
+// entro questo tempo (capitava su Windows/Tauri con certi file di grandi
+// dimensioni, quando il seek per la miniatura non arrivava mai a
+// completarsi), il video viene comunque aggiunto alla libreria senza
+// miniatura, invece di restare in sospeso per sempre e bloccare il resto.
+const METADATA_TIMEOUT_MS = 8000;
+
+// Esegue "worker" su ogni elemento di "items" con al massimo "limit"
+// esecuzioni in parallelo, consegnando ogni risultato a "onItemDone" NON
+// APPENA è pronto (invece che tutti insieme alla fine): questo è ciò che
+// permette alla libreria di popolarsi progressivamente invece di restare
+// vuota finché anche l'ultimo file non è stato processato.
+async function processWithConcurrency(items, limit, worker, onItemDone) {
+  let index = 0;
+  const runNext = async () => {
+    while (index < items.length) {
+      const current = index++;
+      const item = items[current];
+      try {
+        const result = await worker(item);
+        onItemDone(result, item);
+      } catch (err) {
+        console.error('Errore nel processare un elemento della cartella:', err);
+      }
+    }
+  };
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: workerCount }, runNext));
+}
+
 // Card video condivisa tra la libreria normale e i risultati di ricerca
 function VideoCard({ video, isActive, isPreviewing, previewUrl, isTransferring, onPlay, onHoverStart, onHoverEnd, onTransfer, onDelete, onSendToRegia, isSentToRegia }) {
   return (
@@ -513,6 +551,29 @@ export default function LibraryView({ onSendToRegia, sentToRegiaIds }) {
     });
   };
 
+  // Come extractVideoMetadata, ma con un tetto massimo di attesa: se il seek
+  // per la miniatura non si completa in tempo (visto su Windows/Tauri con
+  // alcuni file grandi), risolve comunque con un video "minimo" (senza
+  // miniatura) invece di restare appesa per sempre e bloccare l'intera
+  // cartella (vedi processWithConcurrency più sotto).
+  const extractVideoMetadataSafe = (entry, file) => {
+    const fallback = new Promise((resolve) => {
+      setTimeout(() => {
+        resolve({
+          id: entry.name,
+          name: entry.name,
+          handle: entry,
+          thumbnail: null,
+          duration: '--:--',
+          durationSeconds: 0,
+          size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+          metaTimedOut: true,
+        });
+      }, METADATA_TIMEOUT_MS);
+    });
+    return Promise.race([extractVideoMetadata(entry, file), fallback]);
+  };
+
   // Esplora ricorsivamente l'intero albero della cartella (tutti i sottolivelli)
   // per costruire l'indice di ricerca: solo nome/percorso/handle, senza generare
   // miniature, così resta veloce anche su un HDD pieno di file
@@ -546,7 +607,7 @@ export default function LibraryView({ onSendToRegia, sentToRegiaIds }) {
     if (cache.has(entry.id)) return;
     cache.set(entry.id, { loading: true });
     entry.handle.getFile()
-      .then((file) => extractVideoMetadata(entry.handle, file))
+      .then((file) => extractVideoMetadataSafe(entry.handle, file))
       .then((meta) => {
         cache.set(entry.id, meta);
         setMetaVersion((v) => v + 1);
@@ -577,10 +638,13 @@ export default function LibraryView({ onSendToRegia, sentToRegiaIds }) {
 
       // Nomi già in libreria: evita di reindicizzare o duplicare file già caricati
       const existingNames = new Set(videoList.map((v) => v.id));
-      const loadedVideos = [];
       const foundSubfolders = [];
+      const videoEntries = [];
       let skippedCount = 0;
 
+      // Primo passaggio, veloce: solo elenco file/cartelle, nessuna lettura
+      // pesante. La lettura di metadata/miniatura viene fatta subito dopo,
+      // in parallelo (vedi sotto), non qui dentro.
       for await (const entry of dirHandle.values()) {
         if (entry.kind === 'directory') {
           foundSubfolders.push(entry.name);
@@ -597,33 +661,48 @@ export default function LibraryView({ onSendToRegia, sentToRegiaIds }) {
               skippedCount += 1;
               continue;
             }
-            const file = await entry.getFile();
-            const videoData = await extractVideoMetadata(entry, file);
-            videoData.sourceDir = dirHandle;
-            loadedVideos.push(videoData);
+            videoEntries.push(entry);
             existingNames.add(entry.name);
           }
         }
       }
 
-      setVideoList((prev) =>
-        [...prev, ...loadedVideos].sort((a, b) => a.name.localeCompare(b.name))
-      );
       setSubfolders(foundSubfolders.sort((a, b) => a.localeCompare(b)));
+
+      let loadedCount = 0;
+      // Elabora fino a METADATA_CONCURRENCY video insieme, e aggiunge ognuno
+      // alla libreria appena pronto: niente più attesa che TUTTA la cartella
+      // finisca prima di vedere anche solo un video (era questa l'attesa
+      // infinita su Windows).
+      await processWithConcurrency(
+        videoEntries,
+        METADATA_CONCURRENCY,
+        async (entry) => {
+          const file = await entry.getFile();
+          const videoData = await extractVideoMetadataSafe(entry, file);
+          videoData.sourceDir = dirHandle;
+          return videoData;
+        },
+        (videoData) => {
+          loadedCount += 1;
+          // Riusa i metadati già estratti, così la ricerca non deve
+          // ricalcolare miniatura/durata per gli stessi file
+          metaCacheRef.current.set(videoData.id, {
+            thumbnail: videoData.thumbnail,
+            duration: videoData.duration,
+            durationSeconds: videoData.durationSeconds,
+            size: videoData.size,
+          });
+          setVideoList((prev) => {
+            if (prev.some((v) => v.id === videoData.id)) return prev;
+            return [...prev, videoData].sort((a, b) => a.name.localeCompare(b.name));
+          });
+        }
+      );
+
       setIsLoading(false);
 
-      // Riusa i metadati già estratti per i video di primo livello, così la
-      // ricerca non deve ricalcolare miniatura/durata per gli stessi file
-      loadedVideos.forEach((v) => {
-        metaCacheRef.current.set(v.id, {
-          thumbnail: v.thumbnail,
-          duration: v.duration,
-          durationSeconds: v.durationSeconds,
-          size: v.size,
-        });
-      });
-
-      if (loadedVideos.length === 0) {
+      if (loadedCount === 0) {
         alert(
           skippedCount > 0
             ? "Tutti i video di questa cartella sono già in libreria."
@@ -668,7 +747,7 @@ export default function LibraryView({ onSendToRegia, sentToRegiaIds }) {
       setIsLoading(true);
       const subDirHandle = await rootDirHandle.getDirectoryHandle(name);
       const existingNames = new Set(videoList.map((v) => v.id));
-      const loadedVideos = [];
+      const videoEntries = [];
       let skippedCount = 0;
 
       for await (const entry of subDirHandle.values()) {
@@ -678,29 +757,39 @@ export default function LibraryView({ onSendToRegia, sentToRegiaIds }) {
           skippedCount += 1;
           continue;
         }
-        const file = await entry.getFile();
-        const videoData = await extractVideoMetadata(entry, file);
-        videoData.sourceDir = subDirHandle;
-        loadedVideos.push(videoData);
+        videoEntries.push(entry);
         existingNames.add(entry.name);
       }
 
-      setVideoList((prev) =>
-        [...prev, ...loadedVideos].sort((a, b) => a.name.localeCompare(b.name))
+      let loadedCount = 0;
+      await processWithConcurrency(
+        videoEntries,
+        METADATA_CONCURRENCY,
+        async (entry) => {
+          const file = await entry.getFile();
+          const videoData = await extractVideoMetadataSafe(entry, file);
+          videoData.sourceDir = subDirHandle;
+          return videoData;
+        },
+        (videoData) => {
+          loadedCount += 1;
+          // Riusa i metadati anche qui, con l'id nel formato usato dall'indice di ricerca
+          metaCacheRef.current.set(`${name}/${videoData.id}`, {
+            thumbnail: videoData.thumbnail,
+            duration: videoData.duration,
+            durationSeconds: videoData.durationSeconds,
+            size: videoData.size,
+          });
+          setVideoList((prev) => {
+            if (prev.some((v) => v.id === videoData.id)) return prev;
+            return [...prev, videoData].sort((a, b) => a.name.localeCompare(b.name));
+          });
+        }
       );
+
       setIsLoading(false);
 
-      // Riusa i metadati anche qui, con l'id nel formato usato dall'indice di ricerca
-      loadedVideos.forEach((v) => {
-        metaCacheRef.current.set(`${name}/${v.id}`, {
-          thumbnail: v.thumbnail,
-          duration: v.duration,
-          durationSeconds: v.durationSeconds,
-          size: v.size,
-        });
-      });
-
-      if (loadedVideos.length === 0) {
+      if (loadedCount === 0) {
         alert(
           skippedCount > 0
             ? "Tutti i video di questa sottocartella sono già in libreria."
